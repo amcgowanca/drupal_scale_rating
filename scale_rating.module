@@ -195,6 +195,13 @@ function scale_rating_field_widget_info() {
  * Implements hook_field_widget_form().
  */
 function scale_rating_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  // If the field does not contain any setting values for the minimum and
+  // maximum allowed ratings, exit early and allow the field settings to be
+  // updated prior to rendering.
+  if (!isset($field['settings']['minimum_rating_value']) || !isset($field['settings']['maximum_rating_value'])) {
+    return array();
+  }
+
   $element += array(
     '#tree' => TRUE,
     // Add default scale rating settings for use by rendering element.
