@@ -1,0 +1,441 @@
+<?php
+/**
+ * @file
+ * scale_rating.module
+ */
+
+/**
+ * Implements hook_element_info().
+ */
+function scale_rating_element_info() {
+  return array(
+    'scale_rating_table' => array(
+      '#theme' => 'scale_rating_table',
+      '#process' => array(),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function scale_rating_theme() {
+  return array(
+    'scale_rating_table' => array(
+      'render element' => 'elements',
+    ),
+    'scale_rating_item' => array(
+      'variables' => array(
+        'values' => array('option' => '', 'rating' => ''),
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_info().
+ */
+function scale_rating_field_info() {
+  $info = array();
+  $info['scale_rating'] = array(
+    'label' => t('Scale rating'),
+    'description' => t('Allows one or more text values to be rated on a numeric scale.'),
+    'default_widget' => 'scale_rating_table',
+    'default_formatter' => 'scale_rating_info',
+    // This is a special element that is used within the hook_form_alter() for
+    // overriding the field settings to only allow the cardinality to only be
+    // specified as a single element due to the behavior of this field type.
+    'cardinality_override' => array(
+      'value' => FIELD_CARDINALITY_UNLIMITED,
+    ),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_field_settings_form().
+ */
+function scale_rating_field_settings_form($field, $instance, $has_data) {
+  $form = array(
+    '#type' => 'fieldset',
+    '#title' => t('Scale rating configuration'),
+    '#process' => array('_scale_rating_field_settings_form_process'),
+    '#element_validate' => array('_scale_rating_field_settings_form_validate'),
+    '#field' => $field,
+    '#instance' => $instance,
+    '#has_data' => $has_data,
+  );
+  if ($has_data) {
+    $form['#description'] = t('Some settings and configuration values for this field cannot be updated or changed as the field has data.');
+  }
+  return $form;
+}
+
+/**
+ * Form callback; builds the setting form element fields.
+ */
+function _scale_rating_field_settings_form_process($element, &$form_state) {
+  $field = $element['#field'];
+  $instance = $element['#instance'];
+  $field_has_data = $element['#has_data'];
+  $field_settings = isset($form_state['scale_rating']['field']['settings']) ? $form_state['scale_rating']['field']['settings'] : $field['settings'];
+  // Append default settings to ensure they exist prior to use.
+  $field_settings += array(
+    'options' => array(),
+    'minimum_rating_value' => 0,
+    'maximum_rating_value' => 5,
+  );
+
+  $element['options'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Options to rate'),
+    '#description' => t('The possible value options that can be rated. Enter one option per line.'),
+    '#default_value' => _scale_rating_options_as_string($field_settings['options']),
+    '#disabled' => $field_has_data,
+    '#required' => TRUE,
+    '#element_validate' => array('_scale_rating_field_settings_options_validate'),
+  );
+  $element['minimum_rating_value'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Minimum'),
+    '#description' => t('The minimum scale rating value allowed to be given to a single option.'),
+    '#size' => '4',
+    '#default_value' => $field_settings['minimum_rating_value'],
+    '#required' => TRUE,
+    '#disabled' => $field_has_data,
+    '#element_validate' => array('_scale_rating_field_settings_range_value_validate'),
+  );
+  $element['maximum_rating_value'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maximum'),
+    '#description' => t('The maximum scale rating value allowed to be given to a single option.'),
+    '#size' => '4',
+    '#required' => TRUE,
+    '#default_value' => $field_settings['maximum_rating_value'],
+    '#disabled' => $field_has_data,
+    '#element_validate' => array('_scale_rating_field_settings_range_value_validate'),
+  );
+  return $element;
+}
+
+/**
+ * Form callback; validates the form element settings.
+ */
+function _scale_rating_field_settings_form_validate($element, &$form_state) {
+  $field = $element['#field'];
+  if (isset($form_state['values']['field']['settings'])) {
+    $field['settings'] = $form_state['values']['field']['settings'];
+  }
+  $form_state['scale_rating']['field'] = $field;
+}
+
+/**
+ * Form element callback; validates the 'options' element.
+ */
+function _scale_rating_field_settings_options_validate($element, &$form_state) {
+  $values = _scale_rating_options_extract_values($element['#value']);
+  if (!is_array($values) || empty($values)) {
+    form_error($element, t('Scale rating options list is required.'));
+  }
+
+  form_set_value($element, $values, $form_state);
+}
+
+/**
+ * Form element callback; validates the range related settings values.
+ */
+function _scale_rating_field_settings_range_value_validate($element, &$form_state) {
+  static $error_has_occurred = FALSE;
+  if (!is_numeric($element['#value'])) {
+    form_error($element, t('%title must be a numeric value.', array('%title' => $element['#title'])));
+  }
+
+  $value = (float) $element['#value'];
+
+  if (!$error_has_occurred) {
+    switch ($element['#name']) {
+      case 'field[settings][minimum_rating_value]':
+        $max_value = isset($form_state['values']['field']['settings']['maximum_rating_value']) ? $form_state['values']['field']['settings']['maximum_rating_value'] : 0;
+        $max_value = (float) $max_value;
+        if ($value >= $max_value) {
+          form_error($element, t('%title must be less than the maximum rating value allowed.', array('%title' => $element['#title'])));
+          $error_has_occurred = TRUE;
+        }
+        break;
+      case 'field[settings][maximum_rating_value]':
+        $min_value = isset($form_state['values']['field']['settings']['minimum_rating_value']) ? $form_state['values']['field']['settings']['minimum_rating_value'] : 0;
+        $min_value = (float) $min_value;
+        if ($value <= $min_value) {
+          form_error($element, t('%title must be greater than the minimum rating value allowed.', array('%title' => $element['#title'])));
+          $error_has_occurred = TRUE;
+        }
+        break;
+    }
+  }
+
+  form_set_value($element, $value, $form_state);
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function scale_rating_field_widget_info() {
+  $info = array();
+  $info['scale_rating_table'] = array(
+    'label' => t('Scale rating table'),
+    'field types' => array('scale_rating'),
+    'behaviors' => array(
+      'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+    ),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function scale_rating_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $element += array(
+    '#tree' => TRUE,
+    // Add default scale rating settings for use by rendering element.
+    '#scale_rating' => array(
+      'minimum' => $field['settings']['minimum_rating_value'],
+      'maximum' => $field['settings']['maximum_rating_value'],
+    ),
+  );
+
+  $options = $field['settings']['options'];
+  $js_settings = array(
+    'fields' => array(
+      $field['field_name'] => array(
+        'minimum' => $field['settings']['minimum_rating_value'],
+        'maximum' => $field['settings']['maximum_rating_value'],
+      ),
+    ),
+  );
+
+  $item_values = array();
+  foreach ($items as $delta => $item) {
+    $item_values[$item['option_value']] = $item['rating_value'];
+  }
+
+  switch ($instance['widget']['type']) {
+    case 'scale_rating_table':
+      $element['#type'] = 'scale_rating_table';
+      foreach ($options as $delta => $option_value) {
+        $item_element = array(
+          'option_value' => array('#type' => 'value', '#value' => $option_value),
+          'text' => array(
+            '#markup' => check_plain($option_value)
+          ),
+          'rating_value' => array(
+            '#type' => 'textfield',
+            '#title' => t('Rating value'),
+            '#title_display' => 'invisible',
+            '#default_value' => isset($item_values[$option_value]) ? $item_values[$option_value] : $field['settings']['minimum_rating_value'],
+            '#required' => TRUE,
+            '#size' => 4,
+            '#element_validate' => array('_scale_rating_field_widget_rating_value_validate'),
+            '#scale_rating' => array(
+              'option' => $option_value,
+              'field' => $field,
+            ),
+          ),
+        );
+        $element[] = $item_element;
+      }
+      break;
+  }
+
+  $element['#attached']['library'][] = array('system', 'ui.slider');
+  $element['#attached']['js'][] = array(
+    'type' => 'file',
+    'data' => drupal_get_path('module', 'scale_rating') . '/scale_rating.js',
+  );
+  $element['#attached']['js'][] = array(
+    'type' => 'setting',
+    'data' => array('scaleRating' => $js_settings),
+  );
+  return $element;
+}
+
+/**
+ * Form element callback; validates the range of the rating value.
+ */
+function _scale_rating_field_widget_rating_value_validate($element, &$form_state) {
+  $value = (float) $element['#value'];
+  $minimum_rating_value = (float) $element['#scale_rating']['field']['settings']['minimum_rating_value'];
+  $maximum_rating_value = (float) $element['#scale_rating']['field']['settings']['maximum_rating_value'];
+
+  if ($value < $minimum_rating_value || $value > $maximum_rating_value) {
+    form_error($element, t('The rating value for %title must be between %minimum and %maximum.', array(
+      '%title' => check_plain($element['#scale_rating']['option']),
+      '%minimum' => $minimum_rating_value,
+      '%maximum' => $maximum_rating_value,
+    )));
+  }
+}
+
+/**
+ * Implements hook_field_is_empty().
+ */
+function scale_rating_field_is_empty($item, $field) {
+  // We cannot use empty() on the `rating_value` as a result of the possibility
+  // that the actual value is zero (0).
+  return empty($item['option_value']) || !isset($item['rating_value']);
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function scale_rating_field_formatter_info() {
+  $info = array();
+  $info['scale_rating_info'] = array(
+    'label' => t('Scale rating per value'),
+    'description' => t('Renders a simple list of scale rating values per text value.'),
+    'field types' => array('scale_rating'),
+    'settings' => array(),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function scale_rating_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  switch ($display['type']) {
+    case 'scale_rating_info':
+      $element += array(
+        '#theme' => 'item_list',
+        '#items' => array(),
+      );
+
+      foreach ($items as $delta => $item) {
+        $item_element = array(
+          '#theme' => 'scale_rating_item',
+          '#values' => array(
+            'option' => $item['option_value'],
+            'rating' => $item['rating_value'],
+          ),
+        );
+        $element['#items'][] = array(
+          'data' => render($item_element),
+        );
+      }
+      break;
+  }
+
+  return $element;
+}
+
+/**
+ * Extracts the options to be rated as an array.
+ *
+ * @param string $string
+ *   The string of values to extract into an array.
+ *
+ * @return array
+ *   The values.
+ */
+function _scale_rating_options_extract_values($string) {
+  $values = array();
+  $list = explode("\n", $string);
+  $list = array_map('trim', $list);
+  $list = array_filter($list, 'drupal_strlen');
+  foreach ($list as $delta => $text) {
+    $values[$text] = $text;
+  }
+  return $values;
+}
+
+/**
+ * Returns an array of allowed options as a string.
+ *
+ * @param array $values
+ *   The array of options to return as a string.
+ * @return string
+ *   The string of options.
+ */
+function _scale_rating_options_as_string($values) {
+  if (is_array($values)) {
+    $lines = array();
+    foreach ($values as $key => $value) {
+      $lines[] = $value;
+    }
+    return implode("\n", $lines);
+  }
+
+  return $values;
+}
+
+/**
+ * Theme callback; builds and renders the scale rating table widget.
+ */
+function theme_scale_rating_table($variables) {
+  $elements = &$variables['elements'];
+  $scale_rating_info = !empty($elements['#scale_rating']) ? $elements['#scale_rating'] : array();
+  $scale_rating_info += array('minimum' => 0, 'maximum' => 0);
+
+  $table = array(
+    'header' => array(
+      array('data' => '&nbsp;')
+    ),
+    'rows' => array(),
+  );
+
+  $value_colspan = 0;
+  for ($i = $scale_rating_info['minimum']; $i <= $scale_rating_info['maximum']; $i++) {
+    $table['header'][] = array('data' => $i);
+    $value_colspan++;
+  }
+
+  foreach (element_children($elements) as $delta) {
+    $item = $elements[$delta];
+    $row = array(
+      // Render the text value in the first column.
+      'item' => array('data' => drupal_render($item['text']), 'colspan' => 1),
+      // All other columns should render as a single text input which
+      // is altered at runtime by the client's browser as a slider.
+      'value' => array('data' => '', 'colspan' => $value_colspan),
+    );
+
+    if (isset($item['rating_value'])) {
+      $row['value']['data'] = drupal_render($item['rating_value']);
+    }
+
+    $table['rows'][] = $row;
+  }
+
+  $return = array('#children' => theme('table', $table)) + $elements;
+  return theme('form_element', $return);
+}
+
+/**
+ * Theme callback; builds and renders a single option with its rating value.
+ */
+function theme_scale_rating_item($variables) {
+  $output = '<div class="scale-rating-item">';
+  $output .= '<div class="scale-rating-item-option">' . check_plain($variables['values']['option']) . '</div>';
+  $output .= '<div class="scale-rating-item-rating"><span class="label">' . t('Rating') . ':</span> ' . $variables['values']['rating'] . '</div>';
+  $output .= '</div>';
+  return $output;
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function scale_rating_form_alter(&$form, &$form_state, $form_id) {
+  if ('field_ui_field_edit_form' == $form_id) {
+    if ('scale_rating' == $form['#field']['type']) {
+      if (isset($form['field']['cardinality'])) {
+        unset($form['field']['cardinality']);
+        $form['field']['cardinality'] = array(
+          '#type' => 'value',
+          '#value' => FIELD_CARDINALITY_UNLIMITED,
+        );
+      }
+    }
+  }
+}

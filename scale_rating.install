@@ -1,0 +1,26 @@
+<?php
+/**
+ * @file
+ * scale_rating.install
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function scale_rating_field_schema() {
+  $schema = array();
+  $schema['columns'] = array(
+    'option_value' => array(
+      'description' => 'The option value text.',
+      'type' => 'text',
+      'not null' => FALSE,
+    ),
+    'rating_value' => array(
+      'description' => 'The rating value given to the option.',
+      'type' => 'float',
+      'not null' => FALSE,
+      'default' => 0.0,
+    ),
+  );
+  return $schema;
+}

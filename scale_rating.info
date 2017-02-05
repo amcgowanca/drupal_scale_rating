@@ -1,0 +1,8 @@
+name = Scale Rating
+description = Provides a new field type that allows one or more statements to be rated on a numeric scale with an interactive slider.
+core = 7.x
+version = 7.x-1.0
+package = Scale Rating
+
+dependencies[] = entity
+dependencies[] = field
